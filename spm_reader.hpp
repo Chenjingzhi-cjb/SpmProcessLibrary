@@ -10,31 +10,8 @@
 #include <unordered_map>
 
 
-/* example:
-
-    SpmReader spm_reader("xxx.spm", std::vector<SpmImage::ImageType>{SpmImage::ImageType::HeightSensor,
-                                                                     SpmImage::ImageType::AmplitudeError});
-    // SpmReader spm_reader("xxx.spm", std::vector<std::string>{"Height Sensor", "Amplitude Error"});
-
-    if (spm_reader.readSpm()) {
-        if (spm_reader.isImageAvailable(SpmImage::ImageType::HeightSensor)) {
-            auto &height_image = spm_reader.getImage(SpmImage::ImageType::HeightSensor);
-            // auto &height_image = spm_reader.getImage("Height Sensor");
-            auto &height_real_data = height_image.getRealData();
-            std::cout << height_real_data[0][0] << std::endl;
-            std::cout << height_real_data[height_image.getRows() - 1][0] << std::endl;
-        }
-
-        if (spm_reader.isImageAvailable(SpmImage::ImageType::AmplitudeError)) {
-            auto &error_image = spm_reader.getImage(SpmImage::ImageType::AmplitudeError);
-            // auto &error_image = spm_reader.getImage("Amplitude Error");
-            auto &error_real_data = error_image.getRealData();
-            std::cout << error_real_data[0][0] << std::endl;
-            std::cout << error_real_data[error_image.getRows() - 1][0] << std::endl;
-        }
-    }
-
-*/
+// example
+int spmReaderExample0();
 
 
 class SpmBase {
@@ -183,7 +160,8 @@ public:
     // TODO: 1. 完善 Image Type
     enum class ImageType {
         HeightSensor,
-        AmplitudeError
+        AmplitudeError,
+        All
     };
     static const std::vector<std::string> image_type_str;
 
@@ -228,13 +206,27 @@ const std::vector<std::string> SpmImage::image_type_str = std::vector<std::strin
 
 class SpmReader : public SpmBase {
 public:
+    SpmReader(std::string spm_path, const std::string &image_type)
+            : m_spm_path(std::move(spm_path)) {
+        m_image_type_list.emplace_back(image_type);
+    }
+
+    explicit SpmReader(std::string spm_path, const SpmImage::ImageType &image_type = SpmImage::ImageType::HeightSensor)
+            : m_spm_path(std::move(spm_path)) {
+        if (image_type == SpmImage::ImageType::All) {
+            m_image_type_list.assign(SpmImage::image_type_str.begin(), SpmImage::image_type_str.end());
+        } else if ((int) image_type >= 0 && (int) image_type < SpmImage::image_type_str.size()) {
+            m_image_type_list.emplace_back(SpmImage::image_type_str[(int) image_type]);
+        }
+    }
+
     SpmReader(std::string spm_path, std::vector<std::string> image_type_list)
             : m_spm_path(std::move(spm_path)),
               m_image_type_list(std::move(image_type_list)) {}
 
     SpmReader(std::string spm_path, const std::vector<SpmImage::ImageType> &image_type_list)
             : m_spm_path(std::move(spm_path)) {
-        for (auto &image_type : image_type_list) {
+        for (auto &image_type: image_type_list) {
             if ((int) image_type < 0 || (int) image_type >= SpmImage::image_type_str.size()) continue;
             m_image_type_list.emplace_back(SpmImage::image_type_str[(int) image_type]);
         }
@@ -256,7 +248,7 @@ public:
         parseFileHeadAttributes(spm_file_text_map.at("Head"));
 
         // Parse SPM file text to image attributes and load SPM image data
-        for (auto &spm_file_text : spm_file_text_map) {
+        for (auto &spm_file_text: spm_file_text_map) {
             if (spm_file_text.first != "Head") {
                 SpmImage spm_image;
                 spm_image.parseImageAttributes(spm_file_text.second);
@@ -285,6 +277,11 @@ public:
         return true;
     }
 
+    // Suitable for single channel
+    bool isImageAvailableSingle() {
+        return m_image_list.begin() != m_image_list.end();
+    }
+
     bool isImageAvailable(const std::string &image_type) {
         return m_image_list.find(image_type) != m_image_list.end();
     }
@@ -293,12 +290,22 @@ public:
         return m_image_list.find(SpmImage::image_type_str[(int) image_type]) != m_image_list.end();
     }
 
+    // Suitable for single channel
+    SpmImage &getImageSingle() {
+        return m_image_list.begin()->second;
+    }
+
     SpmImage &getImage(const std::string &image_type) {
         return m_image_list.at(image_type);
     }
 
     SpmImage &getImage(const SpmImage::ImageType &image_type) {
         return m_image_list.at(SpmImage::image_type_str[(int) image_type]);
+    }
+
+    // Suitable for single channel
+    std::vector<std::vector<double>> &getImageRealDataSingle() {
+        return m_image_list.begin()->second.getRealData();
     }
 
     std::vector<std::vector<double>> &getImageRealData(const std::string &image_type) {
@@ -405,6 +412,65 @@ private:
     // Image
     std::unordered_map<std::string, SpmImage> m_image_list;
 };
+
+
+int spmReaderExample0() {
+    // ------------ single channel ------------
+
+    SpmReader spm_reader_single("xxx.spm");  // default - Height Sensor
+    // SpmReader spm_reader_single("xxx.spm", SpmImage::ImageType::HeightSensor);
+    // SpmReader spm_reader_single("xxx.spm", "Height Sensor");
+
+    if (!spm_reader_single.readSpm()) {
+        std::cout << "Reading spm file error!" << std::endl;
+        return -1;
+    }
+
+    if (spm_reader_single.isImageAvailableSingle()) {
+        auto &height_image = spm_reader_single.getImageSingle();
+        // auto &height_image = spm_reader_single.getImage(SpmImage::ImageType::HeightSensor);
+        // auto &height_image = spm_reader_single.getImage("Height Sensor");
+        auto &height_real_data = height_image.getRealData();
+        std::cout << height_real_data[0][0] << std::endl;
+        std::cout << height_real_data[height_image.getRows() - 1][0] << std::endl;
+    }
+
+    // ------------------------------------
+
+    // ------------ multi channel ------------
+
+    SpmReader spm_reader_multi("xxx.spm",
+                               std::vector<SpmImage::ImageType>{
+                                       SpmImage::ImageType::HeightSensor,
+                                       SpmImage::ImageType::AmplitudeError});
+    // SpmReader spm_reader_multi("xxx.spm",
+    //                            std::vector<std::string>{"Height Sensor", "Amplitude Error"});
+
+    if (!spm_reader_multi.readSpm()) {
+        std::cout << "Reading spm file error!" << std::endl;
+        return -1;
+    }
+
+    if (spm_reader_multi.isImageAvailable(SpmImage::ImageType::HeightSensor)) {
+        auto &height_image = spm_reader_multi.getImage(SpmImage::ImageType::HeightSensor);
+        // auto &height_image = spm_reader_multi.getImage("Height Sensor");
+        auto &height_real_data = height_image.getRealData();
+        std::cout << height_real_data[0][0] << std::endl;
+        std::cout << height_real_data[height_image.getRows() - 1][0] << std::endl;
+    }
+
+    if (spm_reader_multi.isImageAvailable(SpmImage::ImageType::AmplitudeError)) {
+        auto &error_image = spm_reader_multi.getImage(SpmImage::ImageType::AmplitudeError);
+        // auto &error_image = spm_reader_multi.getImageSingle("Amplitude Error");
+        auto &error_real_data = error_image.getRealData();
+        std::cout << error_real_data[0][0] << std::endl;
+        std::cout << error_real_data[error_image.getRows() - 1][0] << std::endl;
+    }
+
+    // ------------------------------------
+
+    return 0;
+}
 
 
 #endif //SPM_READER_HPP
