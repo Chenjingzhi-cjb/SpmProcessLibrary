@@ -79,12 +79,29 @@ public:
     }
 
     bool setImageData(std::vector<char> &byte_data) {
+        // set raw data
         if (m_bytes_per_pixel == 2) {
-            setRawData16(byte_data);
+            std::vector<short> raw_data_16;
+            raw_data_16.assign(reinterpret_cast<const short *>(byte_data.data()),
+                               reinterpret_cast<const short *>(byte_data.data() + byte_data.size()));
+            m_raw_data.assign(raw_data_16.begin(), raw_data_16.end());
         } else if (m_bytes_per_pixel == 4) {
-            setRawData32(byte_data);
+            m_raw_data.assign(reinterpret_cast<const int *>(byte_data.data()),
+                              reinterpret_cast<const int *>(byte_data.data() + byte_data.size()));
         } else {
             return false;
+        }
+
+        // calc real data
+        for (int r = (int) (m_number_of_lines - 1); r >= 0; r--) {
+            std::vector<double> line_data;
+            line_data.reserve(m_samps_per_line);
+            for (int c = 0; c < m_samps_per_line; c++) {
+                line_data.emplace_back(
+                        m_raw_data[r * m_samps_per_line + c] * m_z_scale_sens * m_z_scale /
+                        std::pow(2, 8 * m_bytes_per_pixel));
+            }
+            m_real_data.emplace_back(line_data);
         }
 
         return true;
@@ -93,6 +110,8 @@ public:
     unsigned int getDataLength() const { return m_data_length; }
 
     unsigned int getDataOffset() const { return m_data_offset; }
+
+    std::vector<int> &getRawData() { return m_raw_data; }
 
     std::vector<std::vector<double>> &getRealData() { return m_real_data; }
 
@@ -115,44 +134,6 @@ private:
             return value;
         } else {
             return 0;
-        }
-    }
-
-    void setRawData16(std::vector<char> &byte_data) {
-        m_raw_data_16.assign(reinterpret_cast<const short *>(byte_data.data()),
-                             reinterpret_cast<const short *>(byte_data.data() + byte_data.size()));
-
-        calcRealData16();
-    }
-
-    void setRawData32(std::vector<char> &byte_data) {
-        m_raw_data_32.assign(reinterpret_cast<const int *>(byte_data.data()),
-                             reinterpret_cast<const int *>(byte_data.data() + byte_data.size()));
-
-        calcRealData32();
-    }
-
-    void calcRealData16() {
-        for (int r = (int) (m_number_of_lines - 1); r >= 0; r--) {
-            std::vector<double> line_data;
-            line_data.reserve(m_samps_per_line);
-            for (int c = 0; c < m_samps_per_line; c++) {
-                line_data.emplace_back(
-                        m_raw_data_16[r * m_samps_per_line + c] * m_z_scale_sens * m_z_scale / std::pow(2, 16));
-            }
-            m_real_data.emplace_back(line_data);
-        }
-    }
-
-    void calcRealData32() {
-        for (int r = (int) (m_number_of_lines - 1); r >= 0; r--) {
-            std::vector<double> line_data;
-            line_data.reserve(m_samps_per_line);
-            for (int c = 0; c < m_samps_per_line; c++) {
-                line_data.emplace_back(
-                        m_raw_data_32[r * m_samps_per_line + c] * m_z_scale_sens * m_z_scale / std::pow(2, 32));
-            }
-            m_real_data.emplace_back(line_data);
         }
     }
 
@@ -193,8 +174,7 @@ private:
     double m_z_scale_sens{};
 
     // Image data
-    std::vector<short> m_raw_data_16;
-    std::vector<int> m_raw_data_32;
+    std::vector<int> m_raw_data;  // uniformly converted to 4 bytes (int)
     std::vector<std::vector<double>> m_real_data;
 };
 
