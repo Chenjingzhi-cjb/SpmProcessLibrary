@@ -119,6 +119,8 @@ public:
 
     int getCols() const { return (int) m_samps_per_line; }
 
+    int getBytesPerPixel() const { return (int) m_bytes_per_pixel; }
+
 private:
     // unit: V or mV
     // Since the units of sens are all nm/V, the units here are uniformly converted to V.
