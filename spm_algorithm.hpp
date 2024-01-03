@@ -23,8 +23,14 @@ private:
     ~SpmAlgorithm() = default;
 
 public:
-    // 一阶拉平
-    static void flatten_first(std::vector<std::vector<double>> &data) {
+    /**
+     * @brief 一阶拉平处理
+     *
+     * @param data The SPM image real data.
+     * @return None
+     */
+    template<typename T>
+    static void flattenFirst(T &data) {
         const int num_cols = (int) data[0].size();
 
         double sum_m_mu = 0.0;
@@ -52,12 +58,24 @@ public:
         }
     }
 
-    static void flatten_first(SpmImage &spm_image) {
-        flatten_first(spm_image.getRealData());
+    /**
+     * @brief 一阶拉平处理
+     *
+     * @param spm_image The SPM image.
+     * @return None
+     */
+    static void flattenFirst(SpmImage &spm_image) {
+        flattenFirst(spm_image.getRealData());
     }
 
-    // 转为 opencv Image 对象
-    static cv::Mat array2DToImage(const std::vector<std::vector<double>> &array) {
+    /**
+     * @brief 将二维数组转为 OpenCV Mat 对象
+     *
+     * @param array 2D-array
+     * @return mat object
+     */
+    template<typename T>
+    static cv::Mat array2DToImage(const T &array) {
         int rows = (int) array.size();
         int cols = (int) array[0].size();
 
@@ -72,12 +90,24 @@ public:
         return image;
     }
 
+    /**
+     * @brief 将 SPM Image 的 Real Data 转为 OpenCV Mat 对象
+     *
+     * @param spm_image The SPM image.
+     * @return mat object
+     */
     static cv::Mat spmImageToImage(SpmImage &spm_image) {
         return array2DToImage(spm_image.getRealData());
     }
 
-    // 转为 pcl PointCloud 对象
-    static pcl::PointCloud<pcl::PointXYZ>::Ptr array2DToPointCloud(const std::vector<std::vector<double>> &array) {
+    /**
+     * @brief 将二维数组转为 PCL Point Cloud 对象
+     *
+     * @param array 2D-array
+     * @return point cloud shared ptr
+     */
+    template<typename T>
+    static pcl::PointCloud<pcl::PointXYZ>::Ptr array2DToPointCloud(const T &array) {
         int rows = (int) array.size();
         int cols = (int) array[0].size();
 
@@ -99,11 +129,23 @@ public:
         return point_cloud;
     }
 
+    /**
+     * @brief 将 SPM Image 的 Real Data 转为 PCL Point Cloud 对象
+     *
+     * @param spm_image The SPM image.
+     * @return point cloud shared ptr
+     */
     static pcl::PointCloud<pcl::PointXYZ>::Ptr spmImageToPointCloud(SpmImage &spm_image) {
         return array2DToPointCloud(spm_image.getRealData());
     }
 
-    // save to file
+    /**
+     * @brief 将 SPM Image 的 Real Data 保存为 BMP、JPG、PNG 等图像文件
+     *
+     * @param spm_image The SPM image.
+     * @param file_path The file path to save the SPM image.
+     * @return None
+     */
     static void saveSpmImageToImage(SpmImage &spm_image, const std::string &file_path) {
         cv::Mat image = array2DToImage(spm_image.getRealData());
         cv::normalize(image, image, 0, 255, cv::NORM_MINMAX);
@@ -111,7 +153,14 @@ public:
         cv::imwrite(file_path, image);
     }
 
-    // type: 0 - binary; 1 - ascii
+    /**
+     * @brief 将 SPM Image 的 Real Data 保存为 PLY 点云文件
+     *
+     * @param spm_image The SPM image.
+     * @param file_path The file path to save the SPM image. (end with ".ply")
+     * @param type The type of store data. 0 for binary, 1 for ascii.
+     * @return None
+     */
     static void saveSpmImageToPly(SpmImage &spm_image, const std::string &file_path, int type = 0) {
         if (file_path.substr(file_path.find_last_of('.') + 1) != "ply") {
             std::cout << "saveSpmImageToPly() Error: File path must end with '.ply'." << std::endl;
@@ -127,7 +176,14 @@ public:
         }
     }
 
-    // type: 0 - binary; 1 - ascii
+    /**
+     * @brief 将 SPM Image 的 Real Data 保存为 PCD 点云文件
+     *
+     * @param spm_image The SPM image.
+     * @param file_path The file path to save the SPM image. (end with ".pcd")
+     * @param type The type of store data. 0 for binary, 1 for ascii.
+     * @return None
+     */
     static void saveSpmImageToPcd(SpmImage &spm_image, const std::string &file_path, int type = 0) {
         if (file_path.substr(file_path.find_last_of('.') + 1) != "pcd") {
             std::cout << "saveSpmImageToPcd() Error: File path must end with '.pcd'." << std::endl;
