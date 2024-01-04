@@ -73,9 +73,13 @@ public:
         m_number_of_lines = getIntFromTextByRegex(number_of_lines_regex, spm_file_text);
     }
 
-    void setZScale(std::string &spm_file_text, const std::string &z_scale_sens_str, double z_scale_sens) {
-        m_z_scale = getZScaleFromTextByRegex(spm_file_text, z_scale_sens_str);
-        m_z_scale_sens = z_scale_sens;
+    void setZScale(std::string &spm_file_text, std::string &head_text) {
+        std::pair<double, std::string> z_scale_info = getZScaleInfoFromTextByRegex(spm_file_text);
+
+        m_z_scale = z_scale_info.first;
+
+        std::string z_scale_sens_regex = R"(\@)" + z_scale_info.second + R"(: V (\d+(\.\d+)?) .*)";
+        m_z_scale_sens = getDoubleFromTextByRegex(z_scale_sens_regex, head_text);
     }
 
     bool setImageData(std::vector<char> &byte_data) {
@@ -122,20 +126,19 @@ public:
     int getBytesPerPixel() const { return (int) m_bytes_per_pixel; }
 
 private:
-    // unit: V or mV
-    // Since the units of sens are all nm/V, the units here are uniformly converted to V.
-    static double getZScaleFromTextByRegex(std::string &spm_file_text, const std::string &z_scale_sens_str) {
-        std::string z_scale_regex = R"(\@2:Z scale: V \[)" + z_scale_sens_str + R"(\] \(.*?\) (\d+\.\d+) ([mV]+))";
+    static std::pair<double, std::string> getZScaleInfoFromTextByRegex(std::string &spm_file_text) {
+        std::string z_scale_regex = R"(\@2:Z scale: V \[(.*?)\] \(.*?\) (\d+\.\d+) (.*))";
         std::regex pattern(z_scale_regex);
         std::smatch matches;
-        if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 3) {
-            double value = std::stod(matches[1].str());
-            std::string unit = matches[2].str();
-            if (unit == "mV") value /= 1000;  // uniformly converted to V
+        if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 4) {
+            double value = std::stod(matches[2].str());
 
-            return value;
+            std::string unit = matches[3].str();
+            if (unit == "mV") value /= 1000;  // convert mV to V uniformly
+
+            return {value, matches[1].str()};
         } else {
-            return 0;
+            return {0, ""};
         }
     }
 
@@ -143,6 +146,7 @@ public:
     // TODO: 1. 完善 Image Type
     enum class ImageType {
         HeightSensor,
+        Height,
         AmplitudeError,
         All
     };
@@ -182,7 +186,7 @@ private:
 
 // TODO: 1. 完善 Image Type
 const std::vector<std::string> SpmImage::image_type_str = std::vector<std::string>{
-        "Height Sensor", "Amplitude Error"
+        "Height Sensor", "Height", "Amplitude Error"
 };
 
 
@@ -234,21 +238,10 @@ public:
             if (spm_file_text.first != "Head") {
                 SpmImage spm_image;
                 spm_image.parseImageAttributes(spm_file_text.second);
-
-                // TODO: 1. 完善 Image Type
-                if (spm_file_text.first == "Height Sensor") {
-                    spm_image.setZScale(spm_file_text.second, "Sens. ZsensSens", m_sens_ZsensSens);
-                    std::vector<char> byte_data = loadSpmImageData(spm_image);
-                    bool status = spm_image.setImageData(byte_data);
-                    if (!status) return false;
-                } else if (spm_file_text.first == "Amplitude Error") {
-                    spm_image.setZScale(spm_file_text.second, "Sens. Amplitude Error", m_sens_AmplitudeError);
-                    std::vector<char> byte_data = loadSpmImageData(spm_image);
-                    bool status = spm_image.setImageData(byte_data);
-                    if (!status) return false;
-                } else {
-                    continue;
-                }
+                spm_image.setZScale(spm_file_text.second, spm_file_text_map.at("Head"));
+                std::vector<char> byte_data = loadSpmImageData(spm_image);
+                bool status = spm_image.setImageData(byte_data);
+                if (!status) return false;
 
                 m_image_list.emplace(spm_file_text.first, std::move(spm_image));
             }
@@ -362,18 +355,12 @@ private:
     void parseFileHeadAttributes(std::string &spm_file_text) {
         // Can be modified: 可添加需要的属性
         m_scan_size = getIntFromTextByRegex(scan_size_regex, spm_file_text);
-
-        m_sens_ZsensSens = getDoubleFromTextByRegex(sens_ZsensSens_regex, spm_file_text);
-        m_sens_AmplitudeError = getDoubleFromTextByRegex(sens_AmplitudeError_regex, spm_file_text);
     }
 
 public:
     // Can be modified: 可添加需要的属性正则表达式
     const std::string image_type_regex = R"(\@2:Image Data: S \[.*?\] \"(.*?)\")";
     const std::string scan_size_regex = R"(\Scan Size: (\d+(\.\d+)?) nm)";
-
-    const std::string sens_ZsensSens_regex = R"(\@Sens. ZsensSens: V (\d+(\.\d+)?) nm/V)";
-    const std::string sens_AmplitudeError_regex = R"(\@Sens. Amplitude Error: V (\d+(\.\d+)?) nm/V)";
 
 private:
     std::string m_spm_path;
@@ -385,11 +372,6 @@ private:
     // File head general attributes
     // Can be modified: 可添加需要的属性
     unsigned int m_scan_size{};
-
-    // File head special attributes
-    // Can be modified: 可添加需要的属性
-    double m_sens_ZsensSens{};
-    double m_sens_AmplitudeError{};
 
     // Image
     std::unordered_map<std::string, SpmImage> m_image_list;
