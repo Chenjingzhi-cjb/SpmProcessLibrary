@@ -55,7 +55,8 @@ protected:
 
 class SpmImage : public SpmBase {
 public:
-    SpmImage() = default;
+    explicit SpmImage(int scan_size)
+            : m_scan_size(scan_size) {};
 
     ~SpmImage() = default;
 
@@ -125,6 +126,8 @@ public:
 
     int getBytesPerPixel() const { return (int) m_bytes_per_pixel; }
 
+    int getScanSize() const { return m_scan_size; }
+
 private:
     static std::pair<double, std::string> getZScaleInfoFromTextByRegex(std::string &spm_file_text) {
         std::string z_scale_regex = R"(\@2:Z scale: V \[(.*?)\] \(.*?\) (\d+\.\d+) (.*))";
@@ -145,8 +148,10 @@ private:
 public:
     // TODO: 1. 完善 Image Type
     enum class ImageType {
-        HeightSensor,
         Height,
+        HeightSensor,
+        HeightTrace,
+        HeightRetrace,
         AmplitudeError,
         All
     };
@@ -176,6 +181,7 @@ private:
     unsigned int m_samps_per_line{};
     unsigned int m_number_of_lines{};
 
+    int m_scan_size{};
     double m_z_scale{};
     double m_z_scale_sens{};
 
@@ -186,7 +192,7 @@ private:
 
 // TODO: 1. 完善 Image Type
 const std::vector<std::string> SpmImage::image_type_str = std::vector<std::string>{
-        "Height Sensor", "Height", "Amplitude Error"
+        "Height", "Height Sensor", "Height Trace", "Height Retrace", "Amplitude Error"
 };
 
 
@@ -236,7 +242,7 @@ public:
         // Parse SPM file text to image attributes and load SPM image data
         for (auto &spm_file_text: spm_file_text_map) {
             if (spm_file_text.first != "Head") {
-                SpmImage spm_image;
+                SpmImage spm_image((int) m_scan_size);
                 spm_image.parseImageAttributes(spm_file_text.second);
                 spm_image.setZScale(spm_file_text.second, spm_file_text_map.at("Head"));
                 std::vector<char> byte_data = loadSpmImageData(spm_image);
