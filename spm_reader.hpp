@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <windows.h>
 #include <regex>
 #include <cmath>
 #include <utility>
@@ -299,15 +300,27 @@ public:
 
 private:
     std::unordered_map<std::string, std::string> loadSpmFileTextMap() {
-        std::ifstream spm_file(m_spm_path);
-        if (!spm_file.is_open()) {
+
+#ifdef _MSC_VER
+        FILE *spm_file = nullptr;
+        errno_t err = _wfopen_s(&spm_file, string2wstring(m_spm_path).c_str(), L"r");
+#else
+        FILE *spm_file = _wfopen(string2wstring(m_spm_path).c_str(), L"r");
+#endif
+
+        if (!spm_file) {
             std::cout << "Failed to open SPM file: " << m_spm_path << std::endl;
             return {};
         }
 
         std::unordered_map<std::string, std::string> text_map;
         std::string text, line;
-        while (std::getline(spm_file, line)) {
+        std::wstring line_w;
+        wchar_t buffer[1024];
+        while (fgetws(buffer, sizeof(buffer) / sizeof(buffer[0]), spm_file)) {
+            line_w = buffer;
+            line = wstring2string(line_w);
+            line.assign(line.begin(), line.end() - 1);  // 去除 '\n'
             if (line.substr(0, 2) == "\\*") {
                 if (line == m_file_list_end_str) {  // end, last Image list
                     std::string image_type = getStringFromTextByRegex(image_type_regex, text);
@@ -334,26 +347,32 @@ private:
             text.append("\n");
         }
 
-        spm_file.close();
+        fclose(spm_file);
 
         return text_map;
     }
 
     std::vector<char> loadSpmImageData(SpmImage &spm_image) {
-        std::ifstream spm_file(m_spm_path, std::ios::binary);
 
-        if (!spm_file.is_open()) {
+#ifdef _MSC_VER
+        FILE *spm_file = nullptr;
+        errno_t err = _wfopen_s(&spm_file, string2wstring(m_spm_path).c_str(), L"rb");
+#else
+        FILE *spm_file = _wfopen(string2wstring(m_spm_path).c_str(), L"rb");
+#endif
+
+        if (!spm_file) {
             std::cout << "Failed to open SPM file: " << m_spm_path << std::endl;
             return {};
         }
 
         std::vector<char> jump_over(spm_image.getDataOffset());
-        spm_file.read(jump_over.data(), spm_image.getDataOffset());
+        fread(jump_over.data(), 1, spm_image.getDataOffset(), spm_file);
 
         std::vector<char> image_data(spm_image.getDataLength());
-        spm_file.read(image_data.data(), spm_image.getDataLength());
+        fread(image_data.data(), 1, spm_image.getDataLength(), spm_file);
 
-        spm_file.close();
+        fclose(spm_file);
 
         return image_data;
     }
@@ -361,6 +380,36 @@ private:
     void parseFileHeadAttributes(std::string &spm_file_text) {
         // Can be modified: 可添加需要的属性
         m_scan_size = getIntFromTextByRegex(scan_size_regex, spm_file_text);
+    }
+
+    /**
+     * @brief string 转 wstring
+     *
+     * @param str src string
+     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
+     * @return dst string
+     */
+    static std::wstring string2wstring(const std::string &str, _In_ UINT CodePage = CP_ACP) {
+        int len = MultiByteToWideChar(CodePage, 0, str.c_str(), -1, nullptr, 0);
+        std::wstring wstr(len, L'\0');
+        MultiByteToWideChar(CodePage, 0, str.c_str(), -1, const_cast<wchar_t *>(wstr.data()), len);
+        wstr.resize(wcslen(wstr.c_str()));
+        return wstr;
+    }
+
+    /**
+     * @brief wstring 转 string
+     *
+     * @param wstr src wstring
+     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
+     * @return dst string
+     */
+    static std::string wstring2string(const std::wstring &wstr, _In_ UINT CodePage = CP_ACP) {
+        int len = WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::string str(len, '\0');
+        WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, const_cast<char *>(str.data()), len, nullptr, nullptr);
+        str.resize(strlen(str.c_str()));
+        return str;
     }
 
 public:
