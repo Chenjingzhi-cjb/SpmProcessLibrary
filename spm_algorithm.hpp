@@ -7,6 +7,8 @@
 #include <numeric>
 #include <vector>
 
+#include "spm_reader.hpp"
+
 #include "opencv2/opencv.hpp"
 
 #include "pcl/point_types.h"
