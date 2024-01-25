@@ -120,8 +120,8 @@ public:
                 auto value = (float) array[r][c];
 
                 pcl::PointXYZ point;
-                point.x = static_cast<float>(c);
-                point.y = static_cast<float>(rows - r - 1);
+                point.x = (float) (c);
+                point.y = (float) (rows - r - 1);
                 point.z = value;
 
                 point_cloud->push_back(point);
@@ -283,15 +283,15 @@ private:
     arrayToPointCloud(const T &array, int rows, int cols, int scan_size, double multi_k) {
         pcl::PointCloud<pcl::PointXYZ>::Ptr point_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-        double xy_k = scan_size / rows;
+        double xy_k = (double) scan_size / rows;
         for (int r = 0; r < rows; ++r) {
             for (int c = 0; c < cols; ++c) {
                 auto value = (float) array[r * cols + c];
 
                 pcl::PointXYZ point;
-                point.x = static_cast<float>(c * xy_k);
-                point.y = static_cast<float>((rows - r - 1) * xy_k);
-                point.z = value * multi_k;
+                point.x = (float) (c * xy_k);
+                point.y = (float) ((rows - r - 1) * xy_k);
+                point.z = (float) (value * multi_k);
 
                 point_cloud->push_back(point);
             }
