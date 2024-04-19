@@ -1,13 +1,10 @@
 #ifndef SPM_ALGORITHM_HPP
 #define SPM_ALGORITHM_HPP
 
-#include <iostream>
-#include <cmath>
-#include <utility>
-#include <numeric>
-#include <vector>
-
 #include "spm_reader.hpp"
+
+#include <stdexcept>
+#include <numeric>
 
 #include "opencv2/opencv.hpp"
 
@@ -265,6 +262,33 @@ public:
                 pcl::io::savePCDFileASCII(file_path, *cloud);
             }
         }
+    }
+
+    static std::pair<int, int> calcMatchTemplate(cv::Mat &image_tmpl, cv::Mat &image_offset) {
+        if (image_tmpl.empty()) {
+            throw std::invalid_argument(
+                    "calcMatchTemplate() Error: Unable to load image_tmpl or image_tmpl loading error!");
+        }
+
+        if (image_offset.empty()) {
+            throw std::invalid_argument(
+                    "calcMatchTemplate() Error: Unable to load image_offset or image_offset loading error!");
+        }
+
+        cv::Mat image_tmpl_float = image_tmpl.clone();
+        cv::Mat image_offset_float = image_offset.clone();
+        image_tmpl_float.convertTo(image_tmpl_float, CV_32FC1);
+        image_offset_float.convertTo(image_offset_float, CV_32FC1);
+
+        // 进行模板匹配
+        cv::Mat temp;
+        matchTemplate(image_offset_float, image_tmpl_float, temp, cv::TM_CCOEFF_NORMED);
+
+        // 定位匹配的位置
+        cv::Point max_loc;
+        minMaxLoc(temp, nullptr, nullptr, nullptr, &max_loc);
+
+        return std::pair<int, int>{max_loc.x, max_loc.y};
     }
 
 private:

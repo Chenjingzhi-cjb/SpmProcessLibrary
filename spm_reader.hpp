@@ -7,6 +7,7 @@
 #include <regex>
 #include <cmath>
 #include <utility>
+#include <string>
 #include <vector>
 #include <unordered_map>
 
@@ -15,11 +16,11 @@
 int spmReaderExample0();
 
 
-class SpmBase {
+class SpmRegexParse {
 public:
-    SpmBase() = default;
+    SpmRegexParse() = default;
 
-    ~SpmBase() = default;
+    ~SpmRegexParse() = default;
 
 protected:
     static int getIntFromTextByRegex(const std::string &regex_string, std::string &spm_file_text) {
@@ -51,10 +52,74 @@ protected:
             return "";
         }
     }
+
+    static int getIntFromTextByRegexToNM(const std::string &regex_string, std::string &spm_file_text) {
+        std::regex pattern(regex_string);
+        std::smatch matches;
+        if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 3) {
+            if (matches[2].str() == "nm") {
+                return std::stoi(matches[1].str());
+            } else if (matches[2].str() == "um") {
+                return (int) (std::stod(matches[1].str()) * 1000);
+            } else {  // error
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+    }
+
+    static long long getLongLongFromTextByRegexToNM(const std::string &regex_string, std::string &spm_file_text) {
+        std::regex pattern(regex_string);
+        std::smatch matches;
+        if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 3) {
+            if (matches[2].str() == "nm") {
+                return std::stoll(matches[1].str());
+            } else if (matches[2].str() == "um") {
+                return (long long) (std::stod(matches[1].str()) * 1000);
+            } else if (matches[2].str() == "mm") {
+                return (long long) (std::stoll(matches[1].str()) * 1000 * 1000);
+            } else {  // error
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+    }
+
+    static bool replaceIntFromTextByRegex(const std::string &regex_string, std::string &spm_file_text, int new_value) {
+        std::regex pattern(regex_string);
+        std::smatch matches;
+        if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 2) {
+            auto match_str_begin_pos = spm_file_text.find_first_of(matches[0].str());
+            std::string old_value_str = matches[1].str();
+            auto old_value_str_begin_pos = spm_file_text.find_first_of(old_value_str, match_str_begin_pos);
+            spm_file_text = spm_file_text.substr(0, old_value_str_begin_pos) + std::to_string(new_value) +
+                            spm_file_text.substr(old_value_str_begin_pos + old_value_str.size());
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    static double replaceDoubleFromTextByRegex(const std::string &regex_string, std::string &spm_file_text, double new_value) {
+        std::regex pattern(regex_string);
+        std::smatch matches;
+        if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 2) {
+            auto match_str_begin_pos = spm_file_text.find_first_of(matches[0].str());
+            std::string old_value_str = matches[1].str();
+            auto old_value_str_begin_pos = spm_file_text.find_first_of(old_value_str, match_str_begin_pos);
+            spm_file_text = spm_file_text.substr(0, old_value_str_begin_pos) + std::to_string(new_value) +
+                            spm_file_text.substr(old_value_str_begin_pos + old_value_str.size());
+            return true;
+        } else {
+            return false;
+        }
+    }
 };
 
 
-class SpmImage : public SpmBase {
+class SpmImage : public SpmRegexParse {
 public:
     explicit SpmImage(int scan_size)
             : m_scan_size(scan_size) {};
@@ -197,7 +262,7 @@ const std::vector<std::string> SpmImage::image_type_str = std::vector<std::strin
 };
 
 
-class SpmReader : public SpmBase {
+class SpmReader : public SpmRegexParse {
 public:
     SpmReader(std::string spm_path, const std::string &image_type)
             : m_spm_path(std::move(spm_path)) {
@@ -298,6 +363,44 @@ public:
         return m_image_list.at(SpmImage::image_type_str[(int) image_type]).getRealData();
     }
 
+    long long getEngageXPosNM() const { return m_engage_x_pos_nm; }
+
+    long long getEngageYPosNM() const { return m_engage_y_pos_nm; }
+
+    int getXOffsetNM() const { return m_x_offset_nm; }
+
+    int getYOffsetNM() const { return m_y_offset_nm; }
+
+    /**
+     * @brief string 转 wstring
+     *
+     * @param str src string
+     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
+     * @return dst string
+     */
+    static std::wstring string2wstring(const std::string &str, _In_ UINT CodePage = CP_ACP) {
+        int len = MultiByteToWideChar(CodePage, 0, str.c_str(), -1, nullptr, 0);
+        std::wstring wstr(len, L'\0');
+        MultiByteToWideChar(CodePage, 0, str.c_str(), -1, const_cast<wchar_t *>(wstr.data()), len);
+        wstr.resize(wcslen(wstr.c_str()));
+        return wstr;
+    }
+
+    /**
+     * @brief wstring 转 string
+     *
+     * @param wstr src wstring
+     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
+     * @return dst string
+     */
+    static std::string wstring2string(const std::wstring &wstr, _In_ UINT CodePage = CP_ACP) {
+        int len = WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::string str(len, '\0');
+        WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, const_cast<char *>(str.data()), len, nullptr, nullptr);
+        str.resize(strlen(str.c_str()));
+        return str;
+    }
+
 private:
     std::unordered_map<std::string, std::string> loadSpmFileTextMap() {
 
@@ -380,42 +483,20 @@ private:
     void parseFileHeadAttributes(std::string &spm_file_text) {
         // Can be modified: 可添加需要的属性
         m_scan_size = getIntFromTextByRegex(scan_size_regex, spm_file_text);
-    }
-
-    /**
-     * @brief string 转 wstring
-     *
-     * @param str src string
-     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
-     * @return dst string
-     */
-    static std::wstring string2wstring(const std::string &str, _In_ UINT CodePage = CP_ACP) {
-        int len = MultiByteToWideChar(CodePage, 0, str.c_str(), -1, nullptr, 0);
-        std::wstring wstr(len, L'\0');
-        MultiByteToWideChar(CodePage, 0, str.c_str(), -1, const_cast<wchar_t *>(wstr.data()), len);
-        wstr.resize(wcslen(wstr.c_str()));
-        return wstr;
-    }
-
-    /**
-     * @brief wstring 转 string
-     *
-     * @param wstr src wstring
-     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
-     * @return dst string
-     */
-    static std::string wstring2string(const std::wstring &wstr, _In_ UINT CodePage = CP_ACP) {
-        int len = WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::string str(len, '\0');
-        WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, const_cast<char *>(str.data()), len, nullptr, nullptr);
-        str.resize(strlen(str.c_str()));
-        return str;
+        m_engage_x_pos_nm = getLongLongFromTextByRegexToNM(engage_x_pos_regex, spm_file_text);
+        m_engage_y_pos_nm = getLongLongFromTextByRegexToNM(engage_y_pos_regex, spm_file_text);
+        m_x_offset_nm = getIntFromTextByRegex(x_offset_regex, spm_file_text);
+        m_y_offset_nm = getIntFromTextByRegex(y_offset_regex, spm_file_text);
     }
 
 public:
     // Can be modified: 可添加需要的属性正则表达式
     const std::string image_type_regex = R"(\@2:Image Data: S \[.*?\] \"(.*?)\")";
     const std::string scan_size_regex = R"(\Scan Size: (\d+(\.\d+)?) nm)";
+    const std::string engage_x_pos_regex = R"(\\Engage X Pos: ([0-9.-]*) ([num]*))";
+    const std::string engage_y_pos_regex = R"(\\Engage Y Pos: ([0-9.-]*) ([num]*))";
+    const std::string x_offset_regex = R"(\\X Offset: ([0-9.-]*) ([num]*))";
+    const std::string y_offset_regex = R"(\\Y Offset: ([0-9.-]*) ([num]*))";
 
 private:
     std::string m_spm_path;
@@ -427,6 +508,10 @@ private:
     // File head general attributes
     // Can be modified: 可添加需要的属性
     unsigned int m_scan_size{};
+    long long m_engage_x_pos_nm{};
+    long long m_engage_y_pos_nm{};
+    int m_x_offset_nm{};
+    int m_y_offset_nm{};
 
     // Image
     std::unordered_map<std::string, SpmImage> m_image_list;
