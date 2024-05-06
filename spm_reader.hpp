@@ -16,6 +16,66 @@
 int spmReaderExample0();
 
 
+class StringOperations {
+protected:
+    /**
+     * @brief string 转 wstring
+     *
+     * @param str src string
+     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
+     * @return dst string
+     */
+    static std::wstring string2wstring(const std::string &str, _In_ UINT CodePage = CP_ACP) {
+        int len = MultiByteToWideChar(CodePage, 0, str.c_str(), -1, nullptr, 0);
+        std::wstring wstr(len, L'\0');
+        MultiByteToWideChar(CodePage, 0, str.c_str(), -1, const_cast<wchar_t *>(wstr.data()), len);
+        wstr.resize(wcslen(wstr.c_str()));
+        return wstr;
+    }
+
+    /**
+     * @brief wstring 转 string
+     *
+     * @param wstr src wstring
+     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
+     * @return dst string
+     */
+    static std::string wstring2string(const std::wstring &wstr, _In_ UINT CodePage = CP_ACP) {
+        int len = WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        std::string str(len, '\0');
+        WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, const_cast<char *>(str.data()), len, nullptr, nullptr);
+        str.resize(strlen(str.c_str()));
+        return str;
+    }
+
+    static std::string doubleToDecimalString(double value, int decimal_num) {
+        double temp = value;
+        int digits = 0;
+        int sign_bit = value >= 0 ? 1 : -1;
+
+        if (sign_bit == 1) {
+            while (temp >= sign_bit) {
+                digits += 1;
+                temp /= 10;
+            }
+
+            if (digits == 0) digits = 1;
+        } else {
+            digits += 1;
+
+            while (temp <= sign_bit) {
+                digits += 1;
+                temp /= 10;
+            }
+
+            if (digits == 1) digits = 2;
+        }
+
+        return std::to_string(value).substr(0, digits + decimal_num + 1);
+    }
+};
+
+
 class SpmRegexParse {
 public:
     SpmRegexParse() = default;
@@ -91,9 +151,9 @@ protected:
         std::regex pattern(regex_string);
         std::smatch matches;
         if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 2) {
-            auto match_str_begin_pos = spm_file_text.find_first_of(matches[0].str());
+            auto match_str_begin_pos = spm_file_text.find(matches[0].str());
             std::string old_value_str = matches[1].str();
-            auto old_value_str_begin_pos = spm_file_text.find_first_of(old_value_str, match_str_begin_pos);
+            auto old_value_str_begin_pos = spm_file_text.find(old_value_str, match_str_begin_pos);
             spm_file_text = spm_file_text.substr(0, old_value_str_begin_pos) + std::to_string(new_value) +
                             spm_file_text.substr(old_value_str_begin_pos + old_value_str.size());
             return true;
@@ -102,13 +162,14 @@ protected:
         }
     }
 
-    static double replaceDoubleFromTextByRegex(const std::string &regex_string, std::string &spm_file_text, double new_value) {
+    static double
+    replaceDoubleFromTextByRegex(const std::string &regex_string, std::string &spm_file_text, double new_value) {
         std::regex pattern(regex_string);
         std::smatch matches;
         if (std::regex_search(spm_file_text, matches, pattern) && matches.size() >= 2) {
-            auto match_str_begin_pos = spm_file_text.find_first_of(matches[0].str());
+            auto match_str_begin_pos = spm_file_text.find(matches[0].str());
             std::string old_value_str = matches[1].str();
-            auto old_value_str_begin_pos = spm_file_text.find_first_of(old_value_str, match_str_begin_pos);
+            auto old_value_str_begin_pos = spm_file_text.find(old_value_str, match_str_begin_pos);
             spm_file_text = spm_file_text.substr(0, old_value_str_begin_pos) + std::to_string(new_value) +
                             spm_file_text.substr(old_value_str_begin_pos + old_value_str.size());
             return true;
@@ -194,6 +255,8 @@ public:
 
     int getScanSize() const { return m_scan_size; }
 
+    double getZScaleSens() const { return m_z_scale_sens; }
+
 private:
     static std::pair<double, std::string> getZScaleInfoFromTextByRegex(std::string &spm_file_text) {
         std::string z_scale_regex = R"(\@2:Z scale: V \[(.*?)\] \(.*?\) (\d+\.\d+) (.*))";
@@ -262,7 +325,7 @@ const std::vector<std::string> SpmImage::image_type_str = std::vector<std::strin
 };
 
 
-class SpmReader : public SpmRegexParse {
+class SpmReader : public SpmRegexParse, StringOperations {
 public:
     SpmReader(std::string spm_path, const std::string &image_type)
             : m_spm_path(std::move(spm_path)) {
@@ -370,36 +433,6 @@ public:
     int getXOffsetNM() const { return m_x_offset_nm; }
 
     int getYOffsetNM() const { return m_y_offset_nm; }
-
-    /**
-     * @brief string 转 wstring
-     *
-     * @param str src string
-     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
-     * @return dst string
-     */
-    static std::wstring string2wstring(const std::string &str, _In_ UINT CodePage = CP_ACP) {
-        int len = MultiByteToWideChar(CodePage, 0, str.c_str(), -1, nullptr, 0);
-        std::wstring wstr(len, L'\0');
-        MultiByteToWideChar(CodePage, 0, str.c_str(), -1, const_cast<wchar_t *>(wstr.data()), len);
-        wstr.resize(wcslen(wstr.c_str()));
-        return wstr;
-    }
-
-    /**
-     * @brief wstring 转 string
-     *
-     * @param wstr src wstring
-     * @param CodePage The encoding format of the file calling this function. CP_ACP for gbk, CP_UTF8 for utf-8.
-     * @return dst string
-     */
-    static std::string wstring2string(const std::wstring &wstr, _In_ UINT CodePage = CP_ACP) {
-        int len = WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-        std::string str(len, '\0');
-        WideCharToMultiByte(CodePage, 0, wstr.c_str(), -1, const_cast<char *>(str.data()), len, nullptr, nullptr);
-        str.resize(strlen(str.c_str()));
-        return str;
-    }
 
 private:
     std::unordered_map<std::string, std::string> loadSpmFileTextMap() {

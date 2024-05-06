@@ -15,7 +15,7 @@
 #include "pcl/visualization/cloud_viewer.h"
 
 
-class SpmAlgorithm {
+class SpmAlgorithm : public StringOperations {
 private:
     SpmAlgorithm() = default;
 
@@ -322,32 +322,6 @@ private:
         }
 
         return point_cloud;
-    }
-
-    static std::string doubleToDecimalString(double value, int decimal_num) {
-        double temp = value;
-        int digits = 0;
-        int sign_bit = value >= 0 ? 1 : -1;
-
-        if (sign_bit == 1) {
-            while (temp >= sign_bit) {
-                digits += 1;
-                temp /= 10;
-            }
-
-            if (digits == 0) digits = 1;
-        } else {
-            digits += 1;
-
-            while (temp <= sign_bit) {
-                digits += 1;
-                temp /= 10;
-            }
-
-            if (digits == 1) digits = 2;
-        }
-
-        return std::to_string(value).substr(0, digits + decimal_num + 1);
     }
 };
 
