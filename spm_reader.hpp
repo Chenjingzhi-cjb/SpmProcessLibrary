@@ -183,7 +183,7 @@ protected:
 class SpmImage : public SpmRegexParse {
 public:
     explicit SpmImage(int scan_size)
-            : m_scan_size(scan_size) {};
+            : m_scan_size(scan_size) {}
 
     ~SpmImage() = default;
 

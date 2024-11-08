@@ -14,7 +14,7 @@ public:
 
 public:
     void execStitching(const std::string &output_spm_path) {
-        // 实例化 spm 对象
+        // 实例化 spm 对象 并 进行一阶拉平处理
         std::vector<SpmReader> spm_reader_list;
         for (auto &i : m_spm_path_list) {
             SpmReader spm(i, m_image_type);
@@ -22,17 +22,22 @@ public:
                 std::cout << "Reading spm file error!" << std::endl;
                 return;
             }
+            SpmAlgorithm::flattenFirst(spm.getImageSingle());
             spm_reader_list.emplace_back(std::move(spm));
         }
 
-        // 计算图像偏移结果 并 进行一阶拉平处理
-        std::vector<std::pair<int, int>> offset_result;
+        // 计算各图像对于上一幅图像的偏移量 和 高度补偿量
+        std::vector<std::pair<int, int>> image_xy_offset_info;
+        std::vector<std::pair<int, int>> image_height_offset_info;
         for (int i = 0; i < spm_reader_list.size() - 1; ++i) {
-            offset_result.emplace_back(calcSpmImageOffset(spm_reader_list[i], spm_reader_list[i + 1]));
+            image_xy_offset_info.emplace_back(calcImageOffsetInfo(spm_reader_list[i], spm_reader_list[i + 1]));
         }
 
-        // 计算图像位置信息
-        std::vector<std::vector<int>> image_pos_info = calcImagePosInfo(spm_reader_list[0], offset_result);
+        // 计算各图像在最终图像中的位置信息
+        std::vector<std::vector<int>> image_pos_info = calcImagePosInfo(
+                spm_reader_list[0].getImageSingle().getCols(),
+                spm_reader_list[0].getImageSingle().getRows(),
+                image_xy_offset_info);
 
         // 拼图
         std::vector<std::vector<double>> stitching_image_data = stitchingImage(spm_reader_list, image_pos_info);
@@ -46,12 +51,12 @@ public:
 //        cv::waitKey(0);
 
         // 计算新的 z scale 并 保留 7 位小数 + .1
-        double z_scale = calcNewZScale(spm_reader_list[0], stitching_image_data);
+        double z_scale = calcNewZScale(spm_reader_list[0], stitching_image_data) * 1.5;  // "x1.5" 以避免超量程
         z_scale = (std::round(z_scale * 10000000.0) + 1) / 10000000.0;
         std::string z_scale_str = doubleToDecimalString(z_scale, 7);
 
-        // 变换为 byte data
-        std::vector<char> byte_data = calcRawData(spm_reader_list[0], stitching_image_data, z_scale);
+        // 基于拼图的 real data 计算 raw data 并变换为 byte data
+        std::vector<char> byte_data = calcRawDataToByteData(spm_reader_list[0], stitching_image_data, z_scale);
 
         // 构建文件头
         if (!buildOutputSpmHeader(m_spm_path_list[0], output_spm_path, m_image_type, (int) byte_data.size(), z_scale,
@@ -66,17 +71,17 @@ public:
     }
 
 private:
-    static std::pair<int, int> calcSpmImageOffset(SpmReader &spm_tmpl, SpmReader &spm_offset) {
+    static std::pair<int, int> calcImageOffsetInfo(SpmReader &spm_tmpl, SpmReader &spm_offset) {
         // 提取图像数据并进行相关处理
         auto &spm_image_tmpl = spm_tmpl.getImageSingle();
-        SpmAlgorithm::flattenFirst(spm_image_tmpl);
         cv::Mat image_tmpl = SpmAlgorithm::spmImageToImage(spm_image_tmpl);
-        cv::normalize(image_tmpl, image_tmpl, 255, 0, cv::NORM_MINMAX, CV_8U);
+        cv::Mat image_tmpl_normal;
+        cv::normalize(image_tmpl, image_tmpl_normal, 255, 0, cv::NORM_MINMAX, CV_8U);
 
         auto &spm_image_offset = spm_offset.getImageSingle();
-        SpmAlgorithm::flattenFirst(spm_image_offset);
         cv::Mat image_offset = SpmAlgorithm::spmImageToImage(spm_image_offset);
-        cv::normalize(image_offset, image_offset, 255, 0, cv::NORM_MINMAX, CV_8U);
+        cv::Mat image_offset_normal;
+        cv::normalize(image_offset, image_offset_normal, 255, 0, cv::NORM_MINMAX, CV_8U);
 
         // 根据扫描偏移量计算模板匹配的相关参数
         int x_diff = (int) ((spm_offset.getEngageXPosNM() + spm_offset.getXOffsetNM()) -
@@ -86,50 +91,40 @@ private:
 
         int image_tmpl_sub_x_start, image_tmpl_sub_y_start, image_tmpl_sub_width, image_tmpl_sub_height;
         if (x_diff >= 0) {
-            image_tmpl_sub_x_start = (int) (
-                    x_diff * ((double) spm_image_offset.getRows() / spm_image_offset.getScanSize()) +
-                    spm_image_offset.getCols() * 0.2);
-            image_tmpl_sub_width = (int) ((spm_image_offset.getScanSize() - x_diff) *
-                                          ((double) spm_image_offset.getCols() / spm_image_offset.getScanSize()) *
-                                          0.6);
+            image_tmpl_sub_x_start = (int) (spm_image_offset.getCols() * 0.1);
+            image_tmpl_sub_width = (int) ((1 - (double) x_diff / spm_image_offset.getScanSize() - 0.2) * spm_image_offset.getCols());
         } else {  // x_diff < 0
-            image_tmpl_sub_x_start = (int) (spm_image_offset.getCols() * 0.2);
-            image_tmpl_sub_width = (int) ((spm_image_offset.getScanSize() + x_diff) *
-                                          ((double) spm_image_offset.getCols() / spm_image_offset.getScanSize()) *
-                                          0.6);
+            image_tmpl_sub_x_start = (int) ((-1 * (double) x_diff / spm_image_offset.getScanSize() + 0.1) * spm_image_offset.getCols());
+            image_tmpl_sub_width = (int) (spm_image_offset.getCols() - image_tmpl_sub_x_start - spm_image_offset.getCols() * 0.1);
         }
         if (y_diff >= 0) {
-            image_tmpl_sub_y_start = (int) (
-                    y_diff * ((double) spm_image_offset.getCols() / spm_image_offset.getScanSize()) +
-                    spm_image_offset.getRows() * 0.2);
-            image_tmpl_sub_height = (int) ((spm_image_offset.getScanSize() - y_diff) *
-                                           ((double) spm_image_offset.getRows() / spm_image_offset.getScanSize()) *
-                                           0.6);
+            image_tmpl_sub_y_start = (int) (((double) y_diff / spm_image_offset.getScanSize() + 0.1) * spm_image_offset.getRows());
+            image_tmpl_sub_height = (int) (spm_image_offset.getRows() - image_tmpl_sub_y_start - spm_image_offset.getRows() * 0.1);
         } else {  // y_diff < 0
-            image_tmpl_sub_y_start = (int) (spm_image_offset.getRows() * 0.2);
-            image_tmpl_sub_height = (int) ((spm_image_offset.getScanSize() + y_diff) *
-                                           ((double) spm_image_offset.getRows() / spm_image_offset.getScanSize()) *
-                                           0.6);
+            image_tmpl_sub_y_start = (int) (spm_image_offset.getRows() * 0.1);
+            image_tmpl_sub_height = (int) ((1 + (double) y_diff / spm_image_offset.getScanSize() - 0.2) * spm_image_offset.getRows());
         }
 
         // 模板匹配
-        cv::Mat image_tmpl_sub = image_tmpl(
-                cv::Rect(image_tmpl_sub_x_start, image_tmpl_sub_y_start, image_tmpl_sub_width,
-                         image_tmpl_sub_height));
+        cv::Mat image_tmpl_sub = image_tmpl_normal(
+                cv::Rect(image_tmpl_sub_x_start, image_tmpl_sub_y_start, image_tmpl_sub_width, image_tmpl_sub_height));
         std::pair<int, int> offset_value = SpmAlgorithm::calcMatchTemplate(image_tmpl_sub, image_offset);
 
+        cv::Mat image_offset_sub = image_offset_normal(
+                cv::Rect(offset_value.first, offset_value.second, image_tmpl_sub_width, image_tmpl_sub_height));
+
         // 显示匹配结果
-//        cv::rectangle(image_tmpl,
+//        cv::rectangle(image_tmpl_normal,
 //                      cv::Rect(image_tmpl_sub_x_start, image_tmpl_sub_y_start, image_tmpl_sub_width,
 //                               image_tmpl_sub_height),
 //                      cv::Scalar(255), 2);
-//        cv::rectangle(image_offset, cv::Rect(offset_value.first, offset_value.second, image_tmpl_sub_width,
+//        cv::rectangle(image_offset_normal, cv::Rect(offset_value.first, offset_value.second, image_tmpl_sub_width,
 //                                             image_tmpl_sub_height), cv::Scalar(255), 2);
 //
 //        namedWindow("img_tmpl", cv::WINDOW_AUTOSIZE);
-//        imshow("img_tmpl", image_tmpl);
+//        imshow("img_tmpl", image_tmpl_normal);
 //        namedWindow("img_offset", cv::WINDOW_AUTOSIZE);
-//        imshow("img_offset", image_offset);
+//        imshow("img_offset", image_offset_normal);
 //        cv::waitKey(0);
 
         // 返回偏移结果
@@ -138,19 +133,18 @@ private:
     }
 
     static std::vector<std::vector<int>>
-    calcImagePosInfo(SpmReader &spm_reader, std::vector<std::pair<int, int>> &offset_result) {
-        std::vector<std::vector<int>> image_pos_info;  // {{all_x_start, all_x_end, all_y_start, all_y_end}, {first}, {second}, ...}
+    calcImagePosInfo(int image_width, int image_height, std::vector<std::pair<int, int>> &image_offset_info) {
+        // {{all_x_start, all_x_end, all_y_start, all_y_end}, {first}, {second}, ...}
+        std::vector<std::vector<int>> image_pos_info;
 
-        image_pos_info.emplace_back(std::vector<int>{0, spm_reader.getImageSingle().getCols(), 0,
-                                                     spm_reader.getImageSingle().getRows()});  // all
-        image_pos_info.emplace_back(std::vector<int>{0, spm_reader.getImageSingle().getCols(), 0,
-                                                     spm_reader.getImageSingle().getRows()});  // first
+        image_pos_info.emplace_back(std::vector<int>{0, image_width, 0, image_height});  // all
+        image_pos_info.emplace_back(std::vector<int>{0, image_width, 0, image_height});  // first
 
-        for (int i = 0; i < offset_result.size(); ++i) {
-            int current_x_start = image_pos_info[i + 1][0] + offset_result[i].first;
-            int current_x_end = image_pos_info[i + 1][1] + offset_result[i].first;
-            int current_y_start = image_pos_info[i + 1][2] + offset_result[i].second;
-            int current_y_end = image_pos_info[i + 1][3] + offset_result[i].second;
+        for (int i = 0; i < image_offset_info.size(); ++i) {
+            int current_x_start = image_pos_info[i + 1][0] + image_offset_info[i].first;
+            int current_x_end = image_pos_info[i + 1][1] + image_offset_info[i].first;
+            int current_y_start = image_pos_info[i + 1][2] + image_offset_info[i].second;
+            int current_y_end = image_pos_info[i + 1][3] + image_offset_info[i].second;
 
             // change all
             if (current_x_start < image_pos_info[0][0]) {
@@ -175,10 +169,9 @@ private:
 
     static std::vector<std::vector<double>>
     stitchingImage(std::vector<SpmReader> &spm_reader_list, std::vector<std::vector<int>> &image_pos_info) {
+        // 结果图像的尺寸，应为 正方形 且为 64 的倍数
         int stitching_image_rows = image_pos_info[0][3] - image_pos_info[0][2];
         int stitching_image_cols = image_pos_info[0][1] - image_pos_info[0][0];
-
-        // 正方形 且 为 64 的倍数
         if (stitching_image_rows < stitching_image_cols) {
             int col_add_num = 64 - stitching_image_cols % 64;
             image_pos_info[0][1] += col_add_num;
@@ -193,10 +186,11 @@ private:
             stitching_image_cols = stitching_image_rows;
         }
 
+        // 初始化
         std::vector<std::vector<double>> stitching_image_data(stitching_image_rows,
                                                               std::vector<double>(stitching_image_cols, 0));
 
-        for (int index = 0; index < spm_reader_list.size(); ++index) {
+        for (int index = 0; index < spm_reader_list.size(); ++index) {  // 图像层
             for (int r = 0; r < spm_reader_list[index].getImageSingle().getRows(); ++r) {
                 for (int c = 0; c < spm_reader_list[index].getImageSingle().getCols(); ++c) {
                     double value = spm_reader_list[index].getImageRealDataSingle()[r][c];
@@ -238,7 +232,7 @@ private:
     }
 
     static std::vector<char>
-    calcRawData(SpmReader &spm_reader, std::vector<std::vector<double>> &stitching_image_data, double z_scale) {
+    calcRawDataToByteData(SpmReader &spm_reader, std::vector<std::vector<double>> &stitching_image_data, double z_scale) {
         double z_scale_sens = spm_reader.getImageSingle().getZScaleSens();
         int power_num = 8 * spm_reader.getImageSingle().getBytesPerPixel();
 
