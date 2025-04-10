@@ -210,21 +210,25 @@ public:
         m_z_scale_sens = getDoubleFromTextByRegex(z_scale_sens_regex, head_text);
     }
 
-    bool setImageData(std::vector<char> &byte_data) {
+    bool setImageData(std::vector<char> byte_data) {
+        // set byte data
+        m_byte_data = std::move(byte_data);
+
         // set raw data
         if (m_bytes_per_pixel == 2) {
             std::vector<short> raw_data_16;
-            raw_data_16.assign(reinterpret_cast<const short *>(byte_data.data()),
-                               reinterpret_cast<const short *>(byte_data.data() + byte_data.size()));
+            raw_data_16.assign(reinterpret_cast<const short *>(m_byte_data.data()),
+                               reinterpret_cast<const short *>(m_byte_data.data() + m_byte_data.size()));
             m_raw_data.assign(raw_data_16.begin(), raw_data_16.end());
         } else if (m_bytes_per_pixel == 4) {
-            m_raw_data.assign(reinterpret_cast<const int *>(byte_data.data()),
-                              reinterpret_cast<const int *>(byte_data.data() + byte_data.size()));
+            m_raw_data.assign(reinterpret_cast<const int *>(m_byte_data.data()),
+                              reinterpret_cast<const int *>(m_byte_data.data() + m_byte_data.size()));
         } else {
             return false;
         }
 
         // calc real data
+        m_real_data.clear();
         for (int r = (int) (m_number_of_lines - 1); r >= 0; r--) {
             std::vector<double> line_data;
             line_data.reserve(m_samps_per_line);
@@ -242,6 +246,8 @@ public:
     unsigned int getDataLength() const { return m_data_length; }
 
     unsigned int getDataOffset() const { return m_data_offset; }
+
+    std::vector<char> &getByteData() { return m_byte_data; }
 
     std::vector<int> &getRawData() { return m_raw_data; }
 
@@ -315,6 +321,7 @@ private:
     double m_z_scale_sens{};
 
     // Image data
+    std::vector<char> m_byte_data;
     std::vector<int> m_raw_data;  // uniformly converted to 4 bytes (int)
     std::vector<std::vector<double>> m_real_data;
 };
@@ -434,6 +441,49 @@ public:
 
     int getYOffsetNM() const { return m_y_offset_nm; }
 
+    bool saveSpmByte(const std::string &spm_output_path) {
+        return saveSpmByte(spm_output_path, m_image_type_list);
+    }
+
+    bool saveSpmByte(const std::string &spm_output_path,
+                     const std::vector<std::string> &image_type_list) {
+        if (spm_output_path.empty()) {
+            std::cout << "The output SPM file path is empty." << std::endl;
+            return false;
+        }
+
+        if (spm_output_path == m_spm_path) {
+            std::cout << "The output SPM file path is the same as this SPM file path." << std::endl;
+            return false;
+        }
+
+        if (image_type_list.empty()) {
+            std::cout << "The image type list is empty." << std::endl;
+            return false;
+        }
+
+        for (auto &image_type: image_type_list) {
+            if (!isImageAvailable(image_type)) {
+                std::cout << "The image type " << image_type << " is not available." << std::endl;
+                return false;
+            }
+        }
+
+        // 输出文件头并获取文件头的长度
+        int head_data_length = buildSpmFileHead(m_spm_path, spm_output_path, image_type_list);
+        if (head_data_length == 0) {
+            std::cout << "There are no required images in the SPM template file." << std::endl;
+            return false;
+        }
+
+        // 获取输出文件当前的占用空间
+        int current_size = getSpmFileCurrentSize(spm_output_path);
+        if (current_size == 0) return false;
+
+        // 填充 空字节 和 图像数据
+        return appendSpmFileData(spm_output_path, image_type_list, head_data_length, current_size);
+    }
+
 private:
     std::unordered_map<std::string, std::string> loadSpmFileTextMap() {
 
@@ -522,6 +572,133 @@ private:
         m_y_offset_nm = getIntFromTextByRegex(y_offset_regex, spm_file_text);
     }
 
+    int buildSpmFileHead(const std::string &spm_tmpl_path, const std::string &spm_output_path,
+                         const std::vector<std::string> &image_type_list) {
+#ifdef _MSC_VER
+        FILE *spm_tmpl_file = nullptr;
+        errno_t err_index = _wfopen_s(&spm_tmpl_file, string2wstring(spm_tmpl_path).c_str(), L"r");
+#else
+        FILE *spm_tmpl_file = _wfopen(string2wstring(spm_tmpl_path).c_str(), L"r");
+#endif
+
+        if (!spm_tmpl_file) {
+            std::cout << "Failed to open SPM file: " << spm_tmpl_path << std::endl;
+            return 0;
+        }
+
+        std::wofstream spm_output_file(spm_output_path);
+
+        bool is_head = true;
+        int output_image_count = 0;
+        int head_data_length = 0, image_data_offset = 0;
+
+        std::string tmpl_text, tmpl_line;
+        std::wstring tmpl_text_w, tmpl_line_w;
+        wchar_t tmpl_buffer[1024];
+
+        while (fgetws(tmpl_buffer, sizeof(tmpl_buffer) / sizeof(tmpl_buffer[0]), spm_tmpl_file)) {
+            tmpl_line_w = tmpl_buffer;
+            tmpl_line = wstring2string(tmpl_line_w);
+
+            if (tmpl_line == (m_ciao_image_list_str + "\n") || tmpl_line == (m_file_list_end_str + "\n")) {
+                if (is_head) {  // head
+                    // get head data length and calculate next image head data offset
+                    head_data_length = getIntFromTextByRegex(m_data_length_str, tmpl_text);
+                    image_data_offset += head_data_length;
+
+                    // output head text
+                    spm_output_file << tmpl_text_w;
+
+                    is_head = false;
+                } else {  // image
+                    // determine whether it is the required image
+                    std::string this_image_type = getStringFromTextByRegex(image_type_regex, tmpl_text);
+                    if (std::find(image_type_list.begin(), image_type_list.end(), this_image_type) !=
+                        image_type_list.end()) {  // 是需要的图像
+                        // set image head data offset and calculate next image head data offset
+                        replaceIntFromTextByRegex(m_data_offset_str, tmpl_text, image_data_offset);
+                        image_data_offset += getIntFromTextByRegex(m_data_length_str, tmpl_text);
+
+                        // output head text
+                        tmpl_text_w = string2wstring(tmpl_text);
+                        spm_output_file << tmpl_text_w;
+
+                        output_image_count += 1;
+                        if (output_image_count == image_type_list.size()) break;
+                    }
+                }
+
+                tmpl_text.clear();
+                tmpl_text_w.clear();
+            }
+
+            tmpl_text.append(tmpl_line);
+            tmpl_text_w.append(tmpl_line_w);
+        }
+
+        fclose(spm_tmpl_file);
+        spm_output_file.close();
+
+        // no required image
+        if (output_image_count == 0) head_data_length = 0;
+
+        return head_data_length;
+    }
+
+    static int getSpmFileCurrentSize(const std::string &spm_path) {
+        std::ifstream spm_file(spm_path, std::ios::binary | std::ios::ate);
+        if (!spm_file.is_open()) {
+            std::cout << "Failed to open output file: " << spm_path << std::endl;
+            return 0;
+        }
+
+        std::streamsize current_size = spm_file.tellg();  // 获取当前文件大小
+
+        spm_file.close();
+
+        return (int) current_size;
+    }
+
+    bool appendSpmFileData(const std::string &spm_path, const std::vector<std::string> &image_type_list,
+                           int head_data_length, int current_size) {
+        std::ofstream spm_file(spm_path, std::ios::binary | std::ios::app);
+        if (!spm_file.is_open()) {
+            std::cout << "Failed to open output file: " << spm_path << std::endl;
+            return false;
+        }
+
+        if (current_size < head_data_length) {
+            // 填充一个 '0x1A'
+            char fill_byte = '\x1A';
+            spm_file.write(&fill_byte, sizeof(fill_byte));
+
+            // 使用 '0x00' 填充直到达到所需大小
+            std::streamsize bytes_to_append = head_data_length - current_size - 1;
+            char zero_byte = '\0';
+            for (std::streamsize i = 0; i < bytes_to_append; ++i) {
+                spm_file.write(&zero_byte, sizeof(zero_byte));
+            }
+        }
+
+        for (auto &i : image_type_list) {
+            auto &image = m_image_list.at(i);
+            std::vector<char> &byte_data = image.getByteData();
+
+            if (byte_data.empty()) {
+                spm_file.close();
+                return false;
+            }
+
+            for (char a_byte : byte_data) {
+                spm_file.write(&a_byte, sizeof(a_byte));
+            }
+        }
+
+        spm_file.close();
+
+        return true;
+    }
+
 public:
     // Can be modified: 可添加需要的属性正则表达式
     const std::string image_type_regex = R"(\@2:Image Data: S \[.*?\] \"(.*?)\")";
@@ -537,6 +714,8 @@ private:
 
     const std::string m_file_list_end_str = "\\*File list end";
     const std::string m_ciao_image_list_str = "\\*Ciao image list";
+    const std::string m_data_length_str = R"(\Data length: (\d+))";
+    const std::string m_data_offset_str = R"(\Data offset: (\d+))";
 
     // File head general attributes
     // Can be modified: 可添加需要的属性
